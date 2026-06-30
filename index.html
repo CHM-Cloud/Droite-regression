@@ -45,7 +45,11 @@
   .tab.active{background:var(--text); color:#fff; border-color:var(--text);}
   .panel{display:none;}
   .panel.active{display:block;}
-  .stats{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:16px;}
+  .stats{display:grid; grid-template-columns:repeat(4, minmax(120px,1fr)); gap:12px; margin-bottom:16px;}
+  .stat .val.neg{ color:#a32d2d; }
+  .stat .val.mid{ color:#c97a12; }
+  .stat .val.pos{ color:#2f8a45; }
+  @media (max-width:600px){ .stats{ grid-template-columns:repeat(2, 1fr); } }
   .stat{background:#f4f3ee; border-radius:8px; padding:12px 14px;}
   .stat .lbl{font-size:12px; color:var(--muted); margin-bottom:2px;}
   .stat .val{font-size:20px; font-weight:600;}
@@ -60,11 +64,38 @@
     display:inline-flex; align-items:center; gap:8px; cursor:pointer;
     border:1px solid var(--border); border-radius:8px; padding:9px 14px; font-size:14px;
   }
+  .search-dropdown{
+    position:absolute; top:100%; left:0; right:0; background:#fff; border:1px solid var(--border);
+    border-radius:8px; margin-top:4px; max-height:220px; overflow-y:auto; z-index:20;
+    box-shadow:0 4px 12px rgba(0,0,0,0.08); display:none;
+  }
+  .search-dropdown.show{ display:block; }
+  .search-item{ padding:9px 12px; cursor:pointer; font-size:13px; border-bottom:1px solid var(--border); }
+  .search-item:last-child{ border-bottom:none; }
+  .search-item:hover{ background:#f4f3ee; }
+  .search-item .si-name{ font-weight:500; }
+  .search-item .si-meta{ color:var(--muted); font-size:12px; }
+  .history-row{
+    display:flex; justify-content:space-between; align-items:center; padding:8px 12px;
+    font-size:13px; border-bottom:1px solid var(--border); cursor:pointer;
+  }
+  .history-row:last-child{ border-bottom:none; }
+  .history-row:hover{ background:#f4f3ee; }
+  .history-row .hr-ticker{ color:var(--muted); font-size:12px; }
+  .history-empty{ padding:14px; font-size:13px; color:var(--muted); text-align:center; }
   .dash-header{display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:18px; flex-wrap:wrap; gap:10px;}
+  .ext-link{
+    display:inline-flex; align-items:center; gap:6px; font-size:13px; color:var(--accent);
+    border:1px solid var(--border); border-radius:999px; padding:6px 12px; text-decoration:none;
+  }
+  .ext-link:hover{ background:#f4f3ee; }
   .gauges{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:14px; margin:18px 0;}
   .gauge-box{background:#f4f3ee; border-radius:10px; padding:10px; text-align:center;}
   .gauge-box .glabel{font-size:12px; color:var(--muted); margin-top:2px;}
   .gauge-box .gval{font-size:16px; font-weight:700; margin-top:2px;}
+  .gauge-box .gval.neg{ color:#a32d2d; }
+  .gauge-box .gval.mid{ color:#c97a12; }
+  .gauge-box .gval.pos{ color:#2f8a45; }
   .sparkrow{display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:14px; margin-top:6px;}
   .spark-box{background:#f4f3ee; border-radius:10px; padding:10px;}
   .spark-box .slabel{font-size:12px; color:var(--muted); margin-bottom:4px;}
@@ -90,6 +121,13 @@
         </div>
       </div>
       <div class="row" style="margin-top:12px;">
+        <div style="position:relative;">
+          <label for="nameSearchInput">Rechercher une action par nom</label>
+          <input type="text" id="nameSearchInput" placeholder="Ex: EssilorLuxottica, Apple, LVMH..." autocomplete="off" />
+          <div id="searchResults" class="search-dropdown"></div>
+        </div>
+      </div>
+      <div class="row" style="margin-top:12px;">
         <div>
           <label for="tickerInput">Ticker</label>
           <input type="text" id="tickerInput" placeholder="AAPL, EPA:EL, BIT:ENI, MSFT..." value="AAPL" />
@@ -104,6 +142,14 @@
         <button class="secondary" id="rememberUrlBtn">Mémoriser cette URL d'API</button>
       </div>
       <p id="msg"></p>
+
+      <div id="historyBox" style="margin-top:18px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <span style="font-size:13px; color:var(--muted); font-weight:600;">Historique des recherches</span>
+          <button class="secondary" id="clearHistoryBtn" style="padding:4px 10px; font-size:12px;">Effacer</button>
+        </div>
+        <div id="historyList" style="max-height:220px; overflow-y:auto; border:1px solid var(--border); border-radius:8px;"></div>
+      </div>
     </div>
 
     <div class="panel" id="panel-csv">
@@ -125,6 +171,8 @@
         <div id="dashChange" style="font-size:13px;"></div>
       </div>
     </div>
+
+    <div id="externalLinks" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:18px;"></div>
 
     <div class="stats" id="infoGrid"></div>
 
@@ -188,7 +236,7 @@
 
   function fmtPct(v){ return (v>=0?'+':'') + v.toFixed(2) + ' %'; }
 
-  function drawGauge(container, label, value, min, max, decimals, suffix){
+  function drawGauge(container, label, value, min, max, decimals, suffix, colorClass){
     var pct = Math.max(0, Math.min(1, (value - min) / (max - min)));
     var angle = -90 + pct * 180; // -90..+90
     var rad = angle * Math.PI / 180;
@@ -212,8 +260,9 @@
       '<circle cx="'+cx+'" cy="'+cy+'" r="5" fill="#185fa5"/>' +
       '</svg>';
 
+    var valCls = colorClass ? ' '+colorClass : '';
     container.innerHTML = svg +
-      '<div class="gval">'+ value.toFixed(decimals) + (suffix||'') +'</div>' +
+      '<div class="gval'+valCls+'">'+ value.toFixed(decimals) + (suffix||'') +'</div>' +
       '<div class="glabel">'+label+'</div>';
   }
 
@@ -243,6 +292,19 @@
 
     document.getElementById('dashName').textContent = meta.name || meta.ticker || '';
     document.getElementById('dashTicker').textContent = meta.ticker || '';
+
+    var rawTicker = (meta.ticker || '').toString();
+    var symbolOnly = rawTicker.indexOf(':') >= 0 ? rawTicker.split(':').pop() : rawTicker;
+    var searchTerm = encodeURIComponent(meta.name || symbolOnly);
+    var links = [
+      { label: 'ZoneBourse', url: 'https://www.zonebourse.com/recherche/?q=' + searchTerm },
+      { label: 'GuruFocus', url: 'https://www.gurufocus.com/search?s=' + encodeURIComponent(symbolOnly) },
+      { label: 'Yahoo Finance', url: 'https://finance.yahoo.com/lookup?s=' + encodeURIComponent(symbolOnly) },
+      { label: 'Google Finance', url: 'https://www.google.com/finance/quote/' + encodeURIComponent(rawTicker.replace(':', ':')) }
+    ];
+    document.getElementById('externalLinks').innerHTML = links.map(function(l){
+      return '<a class="ext-link" href="'+l.url+'" target="_blank" rel="noopener noreferrer">'+l.label+' ↗</a>';
+    }).join('');
     document.getElementById('dashPrice').textContent = lastClose.toFixed(2) + ' ' + (meta.currency || '');
     var changeEl = document.getElementById('dashChange');
     if (meta.changePct !== undefined && meta.changePct !== null && meta.changePct !== ''){
@@ -261,6 +323,10 @@
     var sumSq = resid.reduce((a,b)=>a+b*b,0);
     var std = Math.sqrt(sumSq/(n-2));
     var valeurTheorique = regression[n-1];
+    var bandMinus2 = Math.exp(predLog[n-1] - 2*std);
+    var bandMinus1 = Math.exp(predLog[n-1] - std);
+    var bandPlus1 = Math.exp(predLog[n-1] + std);
+    var bandPlus2 = Math.exp(predLog[n-1] + 2*std);
 
     // Nb écart type = combien d'écarts-types sépare le cours actuel de la régression
     var nbEcartType = (ylog[n-1] - predLog[n-1]) / std;
@@ -312,16 +378,35 @@
 
     // --- Info grid ---
     var infoGrid = document.getElementById('infoGrid');
-    function card(label,val){ return '<div class="stat"><div class="lbl">'+label+'</div><div class="val">'+val+'</div></div>'; }
+    function card(label,val,colorClass){
+      var cls = colorClass ? ' '+colorClass : '';
+      return '<div class="stat"><div class="lbl">'+label+'</div><div class="val'+cls+'">'+val+'</div></div>';
+    }
+    function pctColor(v){
+      if (v === null || v === undefined) return '';
+      if (v < 0) return 'neg';
+      if (v < 10) return 'mid';
+      return 'pos';
+    }
+    function valuationColorStd(v){
+      // inversé: sous la tendance (négatif) = vert, au-dessus = rouge
+      if (v < -1) return 'pos';
+      if (v <= 1) return 'mid';
+      return 'neg';
+    }
     infoGrid.innerHTML =
       card('Devise', meta.currency || '-') +
       card('Valeur théorique', valeurTheorique.toFixed(2)) +
       card('+ haut 52 sem', high52.toFixed(2)) +
       card('+ bas 52 sem', low52.toFixed(2)) +
-      card('Progression 7 j', prog7j!==null? fmtPct(prog7j):'-') +
-      card('Progression 30 j', prog30j!==null? fmtPct(prog30j):'-') +
-      card('Progression 1 an', prog1an!==null? fmtPct(prog1an):'-') +
-      card('Progression 5 ans', prog5ans!==null? fmtPct(prog5ans):'-');
+      card('-2 écart-type', bandMinus2.toFixed(2)) +
+      card('-1 écart-type', bandMinus1.toFixed(2)) +
+      card('+1 écart-type', bandPlus1.toFixed(2)) +
+      card('+2 écart-type', bandPlus2.toFixed(2)) +
+      card('Progression 7 j', prog7j!==null? fmtPct(prog7j):'-', pctColor(prog7j)) +
+      card('Progression 30 j', prog30j!==null? fmtPct(prog30j):'-', pctColor(prog30j)) +
+      card('Progression 1 an', prog1an!==null? fmtPct(prog1an):'-', pctColor(prog1an)) +
+      card('Progression 5 ans', prog5ans!==null? fmtPct(prog5ans):'-', pctColor(prog5ans));
 
     // --- Gauges ---
     var gaugeGrid = document.getElementById('gaugeGrid');
@@ -331,11 +416,11 @@
       '<div class="gauge-box" id="g3"></div>' +
       '<div class="gauge-box" id="g4"></div>' +
       '<div class="gauge-box" id="g5"></div>';
-    drawGauge(document.getElementById('g1'), 'Croissance modèle', croissanceModele, -10, 30, 2, '%');
+    drawGauge(document.getElementById('g1'), 'Croissance modèle', croissanceModele, -10, 30, 2, '%', pctColor(croissanceModele));
     drawGauge(document.getElementById('g2'), 'Coeff corrélation', coeffCorrel, 0, 1, 2, '');
-    drawGauge(document.getElementById('g3'), 'Nb écart type', nbEcartType, -3, 3, 2, '');
-    drawGauge(document.getElementById('g4'), 'Prog. 1 an', prog1an||0, -100, 100, 1, '%');
-    drawGauge(document.getElementById('g5'), 'Prog. 5 ans', prog5ans||0, -100, 200, 1, '%');
+    drawGauge(document.getElementById('g3'), 'Nb écart type', nbEcartType, -3, 3, 2, '', valuationColorStd(nbEcartType));
+    drawGauge(document.getElementById('g4'), 'Prog. 1 an', prog1an||0, -100, 100, 1, '%', pctColor(prog1an));
+    drawGauge(document.getElementById('g5'), 'Prog. 5 ans', prog5ans||0, -100, 200, 1, '%', pctColor(prog5ans));
 
     // --- Sparklines ---
     sparkCharts.forEach(c=>{ if(c) c.destroy(); });
@@ -389,15 +474,29 @@
     var r2 = 1 - sumSq/totSS;
 
     var statsRow = document.getElementById('statsRow');
-    function card(label,val){
-      return '<div class="stat"><div class="lbl">'+label+'</div><div class="val">'+val+'</div></div>';
+    function card(label,val,colorClass){
+      var cls = colorClass ? ' '+colorClass : '';
+      return '<div class="stat"><div class="lbl">'+label+'</div><div class="val'+cls+'">'+val+'</div></div>';
+    }
+    function pctColorLocal(v){
+      if (v === null || v === undefined) return '';
+      if (v < 0) return 'neg';
+      if (v < 10) return 'mid';
+      return 'pos';
+    }
+    function valuationColor(v){
+      // inversé: cours sous la tendance = vert (sous-évalué), au-dessus = rouge (sur-évalué)
+      if (v === null || v === undefined) return '';
+      if (v < -10) return 'pos';
+      if (v <= 10) return 'mid';
+      return 'neg';
     }
     statsRow.innerHTML =
       card('Ticker', tickerLabel || '-') +
-      card('Croissance annualisée', annualReturn.toFixed(2)+' %') +
+      card('Croissance annualisée', annualReturn.toFixed(2)+' %', pctColorLocal(annualReturn)) +
       card('R²', r2.toFixed(3)) +
       card('Écart-type résiduel', (std*100).toFixed(2)+' %') +
-      card('Écart au dernier cours', (ecartPct>=0?'+':'')+ecartPct.toFixed(1)+' %');
+      card('Écart au dernier cours', (ecartPct>=0?'+':'')+ecartPct.toFixed(1)+' %', valuationColor(ecartPct));
 
     var ctx = document.getElementById('regChart');
     if (chart) chart.destroy();
@@ -445,12 +544,107 @@
         if (data.error){ setMsg(data.error, true); return; }
         if (!data.dates || !data.dates.length){ setMsg('Aucune donnée renvoyée pour ce ticker.', true); return; }
         setMsg(data.dates.length + ' points chargés pour ' + data.ticker + '.', false);
+        addToHistory(data.name || data.ticker, data.ticker);
         computeAndRender(data.dates, data.closes, data.ticker, data);
       })
       .catch(function(err){
         setMsg("Erreur lors de l'appel à l'API : " + err.message + ". Vérifie l'URL et que le déploiement est accessible à 'Tous les utilisateurs'.", true);
       });
   });
+
+  // --- Recherche d'actions par nom ---
+  var searchTimer = null;
+  var searchInput = document.getElementById('nameSearchInput');
+  var searchDropdown = document.getElementById('searchResults');
+
+  searchInput.addEventListener('input', function(){
+    var q = searchInput.value.trim();
+    clearTimeout(searchTimer);
+    if (q.length < 2){ searchDropdown.classList.remove('show'); return; }
+    searchTimer = setTimeout(function(){ runSearch(q); }, 350);
+  });
+
+  document.addEventListener('click', function(ev){
+    if (!searchDropdown.contains(ev.target) && ev.target !== searchInput){
+      searchDropdown.classList.remove('show');
+    }
+  });
+
+  function runSearch(q){
+    var apiUrl = document.getElementById('apiUrl').value.trim();
+    if (!apiUrl){
+      searchDropdown.innerHTML = '<div class="search-item"><span class="si-meta">Renseigne d\'abord l\'URL de ton Apps Script ci-dessus.</span></div>';
+      searchDropdown.classList.add('show');
+      return;
+    }
+    var url = apiUrl + (apiUrl.indexOf('?')>=0?'&':'?') + 'action=search&q=' + encodeURIComponent(q);
+    fetch(url).then(function(r){ return r.json(); }).then(function(data){
+      if (data.error || !data.results || !data.results.length){
+        searchDropdown.innerHTML = '<div class="search-item"><span class="si-meta">Aucun résultat.</span></div>';
+        searchDropdown.classList.add('show');
+        return;
+      }
+      searchDropdown.innerHTML = data.results.map(function(r){
+        return '<div class="search-item" data-ticker="'+r.symbol+'" data-name="'+r.name.replace(/"/g,'&quot;')+'">' +
+          '<div class="si-name">'+r.name+'</div>' +
+          '<div class="si-meta">'+r.symbol+(r.exchange? ' · '+r.exchange:'')+'</div></div>';
+      }).join('');
+      searchDropdown.classList.add('show');
+      searchDropdown.querySelectorAll('.search-item[data-ticker]').forEach(function(el){
+        el.addEventListener('click', function(){
+          document.getElementById('tickerInput').value = el.dataset.ticker;
+          searchInput.value = el.dataset.name;
+          searchDropdown.classList.remove('show');
+        });
+      });
+    }).catch(function(){
+      searchDropdown.innerHTML = '<div class="search-item"><span class="si-meta">Erreur de recherche.</span></div>';
+      searchDropdown.classList.add('show');
+    });
+  }
+
+  // --- Historique des recherches (localStorage, max 50, par navigateur) ---
+  var HISTORY_KEY = 'regapp_search_history';
+
+  function getHistory(){
+    try { return JSON.parse(localStorage.getItem(HISTORY_KEY)) || []; }
+    catch(e){ return []; }
+  }
+
+  function addToHistory(name, ticker){
+    var hist = getHistory();
+    hist = hist.filter(function(h){ return h.ticker !== ticker; });
+    hist.unshift({ name: name, ticker: ticker, date: new Date().toISOString() });
+    hist = hist.slice(0, 50);
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(hist));
+    renderHistory();
+  }
+
+  function renderHistory(){
+    var hist = getHistory();
+    var box = document.getElementById('historyList');
+    if (!hist.length){
+      box.innerHTML = '<div class="history-empty">Aucune recherche pour le moment.</div>';
+      return;
+    }
+    box.innerHTML = hist.map(function(h){
+      return '<div class="history-row" data-ticker="'+h.ticker+'">' +
+        '<span>'+h.name+'</span><span class="hr-ticker">'+h.ticker+'</span></div>';
+    }).join('');
+    box.querySelectorAll('.history-row').forEach(function(el){
+      el.addEventListener('click', function(){
+        document.getElementById('tickerInput').value = el.dataset.ticker;
+        document.getElementById('fetchBtn').click();
+      });
+    });
+  }
+
+  document.getElementById('clearHistoryBtn').addEventListener('click', function(){
+    localStorage.removeItem(HISTORY_KEY);
+    renderHistory();
+  });
+
+  renderHistory();
 
   function parseCSV(text){
     var result = Papa.parse(text, { header:true, skipEmptyLines:true });
