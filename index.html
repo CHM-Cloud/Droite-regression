@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Régression sur cours boursier</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<style>
+  :root{
+    --bg:#fafaf8; --card:#ffffff; --border:#e1e0d9; --text:#0b0b0b;
+    --muted:#65645e; --accent:#185fa5;
+  }
+  *{box-sizing:border-box;}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    background:var(--bg); color:var(--text); margin:0; padding:24px;
+  }
+  .wrap{max-width:920px; margin:0 auto;}
+  h1{font-size:20px; font-weight:600; margin:0 0 4px;}
+  p.sub{color:var(--muted); font-size:14px; margin:0 0 24px;}
+  .card{
+    background:var(--card); border:1px solid var(--border); border-radius:12px;
+    padding:20px; margin-bottom:20px;
+  }
+  label{font-size:13px; color:var(--muted); display:block; margin-bottom:4px;}
+  input[type=text], input[type=url], input[type=number]{
+    width:100%; padding:9px 10px; border:1px solid var(--border); border-radius:8px;
+    font-size:14px; background:#fff;
+  }
+  .row{display:flex; gap:12px; flex-wrap:wrap;}
+  .row > div{flex:1; min-width:160px;}
+  button{
+    background:var(--accent); color:#fff; border:none; border-radius:8px;
+    padding:10px 16px; font-size:14px; cursor:pointer; font-weight:500;
+  }
+  button.secondary{background:#fff; color:var(--text); border:1px solid var(--border);}
+  button:hover{opacity:0.92;}
+  .btnrow{display:flex; gap:10px; margin-top:14px; flex-wrap:wrap; align-items:center;}
+  .tabs{display:flex; gap:8px; margin-bottom:16px;}
+  .tab{
+    padding:8px 14px; border-radius:8px; cursor:pointer; font-size:14px;
+    border:1px solid var(--border); background:#fff; color:var(--muted);
+  }
+  .tab.active{background:var(--text); color:#fff; border-color:var(--text);}
+  .panel{display:none;}
+  .panel.active{display:block;}
+  .stats{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:16px;}
+  .stat{background:#f4f3ee; border-radius:8px; padding:12px 14px;}
+  .stat .lbl{font-size:12px; color:var(--muted); margin-bottom:2px;}
+  .stat .val{font-size:20px; font-weight:600;}
+  .legend{display:flex; flex-wrap:wrap; gap:16px; font-size:13px; color:var(--muted); margin-bottom:10px;}
+  .legend span{display:flex; align-items:center; gap:5px;}
+  .swatch{width:10px; height:10px; border-radius:2px; display:inline-block;}
+  #msg{font-size:13px; color:var(--muted); margin-top:10px;}
+  #msg.error{color:#a32d2d;}
+  .chart-wrap{position:relative; width:100%; height:380px;}
+  .footer-note{font-size:12px; color:var(--muted); margin-top:24px; line-height:1.6;}
+  .file-label{
+    display:inline-flex; align-items:center; gap:8px; cursor:pointer;
+    border:1px solid var(--border); border-radius:8px; padding:9px 14px; font-size:14px;
+  }
+  .dash-header{display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:18px; flex-wrap:wrap; gap:10px;}
+  .gauges{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:14px; margin:18px 0;}
+  .gauge-box{background:#f4f3ee; border-radius:10px; padding:10px; text-align:center;}
+  .gauge-box .glabel{font-size:12px; color:var(--muted); margin-top:2px;}
+  .gauge-box .gval{font-size:16px; font-weight:700; margin-top:2px;}
+  .sparkrow{display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:14px; margin-top:6px;}
+  .spark-box{background:#f4f3ee; border-radius:10px; padding:10px;}
+  .spark-box .slabel{font-size:12px; color:var(--muted); margin-bottom:4px;}
+  .spark-canvas-wrap{height:60px; position:relative;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Régression linéaire sur cours boursier</h1>
+  <p class="sub">Régression exponentielle (log-linéaire) avec bandes à ±1 et ±2 écarts-types, pour n'importe quel ticker.</p>
+
+  <div class="card">
+    <div class="tabs">
+      <div class="tab active" data-tab="api">Récupérer un ticker (Google Sheet API)</div>
+      <div class="tab" data-tab="csv">Importer un CSV</div>
+    </div>
+
+    <div class="panel active" id="panel-api">
+      <div class="row">
+        <div>
+          <label for="apiUrl">URL de ton Apps Script (se termine par /exec)</label>
+          <input type="url" id="apiUrl" placeholder="https://script.google.com/macros/s/AKfycb.../exec" />
+        </div>
+      </div>
+      <div class="row" style="margin-top:12px;">
+        <div>
+          <label for="tickerInput">Ticker</label>
+          <input type="text" id="tickerInput" placeholder="AAPL, EPA:EL, BIT:ENI, MSFT..." value="AAPL" />
+        </div>
+        <div>
+          <label for="daysInput">Historique (jours)</label>
+          <input type="number" id="daysInput" value="9125" />
+        </div>
+      </div>
+      <div class="btnrow">
+        <button id="fetchBtn">Charger le ticker</button>
+        <button class="secondary" id="rememberUrlBtn">Mémoriser cette URL d'API</button>
+      </div>
+      <p id="msg"></p>
+    </div>
+
+    <div class="panel" id="panel-csv">
+      <label class="file-label">
+        Choisir un fichier CSV (colonnes Date, Close)
+        <input type="file" id="csvInput" accept=".csv" style="display:none;" />
+      </label>
+    </div>
+  </div>
+
+  <div class="card" id="dashCard" style="display:none;">
+    <div class="dash-header">
+      <div>
+        <div id="dashName" style="font-size:18px; font-weight:600;"></div>
+        <div id="dashTicker" style="font-size:13px; color:var(--muted);"></div>
+      </div>
+      <div style="text-align:right;">
+        <div id="dashPrice" style="font-size:24px; font-weight:700;"></div>
+        <div id="dashChange" style="font-size:13px;"></div>
+      </div>
+    </div>
+
+    <div class="stats" id="infoGrid"></div>
+
+    <div class="gauges" id="gaugeGrid"></div>
+
+    <div class="sparkrow" id="sparkGrid"></div>
+  </div>
+
+  <div class="card" id="resultsCard" style="display:none;">
+    <div class="stats" id="statsRow"></div>
+    <div class="legend">
+      <span><span class="swatch" style="background:#2a78d6;"></span>Cours de clôture</span>
+      <span><span class="swatch" style="background:#e34948;"></span>Régression</span>
+      <span><span class="swatch" style="background:#eda100;"></span>±1 écart-type</span>
+      <span><span class="swatch" style="background:#898781;"></span>±2 écarts-type</span>
+    </div>
+    <div class="chart-wrap"><canvas id="regChart"></canvas></div>
+  </div>
+
+  <p class="footer-note">
+    L'onglet "Récupérer un ticker" appelle l'API Apps Script déployée depuis ton Google Sheet (fonction GOOGLEFINANCE),
+    ce qui permet de charger l'historique de n'importe quel ticker supporté par Google Finance sans ressaisir de données.
+    L'URL d'API est mémorisée localement dans ce navigateur uniquement.
+  </p>
+</div>
+
+<script>
+(function(){
+  var chart = null;
+
+  document.querySelectorAll('.tab').forEach(function(tab){
+    tab.addEventListener('click', function(){
+      document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+      document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+      tab.classList.add('active');
+      document.getElementById('panel-'+tab.dataset.tab).classList.add('active');
+    });
+  });
+
+  var savedUrl = localStorage.getItem('regapp_api_url');
+  if (savedUrl) document.getElementById('apiUrl').value = savedUrl;
+
+  document.getElementById('rememberUrlBtn').addEventListener('click', function(){
+    localStorage.setItem('regapp_api_url', document.getElementById('apiUrl').value.trim());
+    setMsg('URL mémorisée pour les prochaines visites.', false);
+  });
+
+  function setMsg(text, isError){
+    var el = document.getElementById('msg');
+    el.textContent = text;
+    el.className = isError ? 'error' : '';
+  }
+
+  function linreg(xArr,yArr){
+    var n = xArr.length, sx=0, sy=0, sxx=0, sxy=0;
+    for (var i=0;i<n;i++){ sx+=xArr[i]; sy+=yArr[i]; sxx+=xArr[i]*xArr[i]; sxy+=xArr[i]*yArr[i]; }
+    var slope = (n*sxy - sx*sy) / (n*sxx - sx*sx);
+    var intercept = (sy - slope*sx) / n;
+    return {slope:slope, intercept:intercept};
+  }
+
+  function fmtPct(v){ return (v>=0?'+':'') + v.toFixed(2) + ' %'; }
+
+  function drawGauge(container, label, value, min, max, decimals, suffix){
+    var pct = Math.max(0, Math.min(1, (value - min) / (max - min)));
+    var angle = -90 + pct * 180; // -90..+90
+    var rad = angle * Math.PI / 180;
+    var cx = 60, cy = 60, r = 46;
+    var nx = cx + r * Math.sin(rad);
+    var ny = cy - r * Math.cos(rad);
+
+    function arcPath(startDeg, endDeg){
+      var sR = (startDeg) * Math.PI/180, eR = (endDeg) * Math.PI/180;
+      var x1 = cx + r*Math.sin(sR), y1 = cy - r*Math.cos(sR);
+      var x2 = cx + r*Math.sin(eR), y2 = cy - r*Math.cos(eR);
+      var large = (endDeg-startDeg) > 180 ? 1 : 0;
+      return 'M'+x1+','+y1+' A'+r+','+r+' 0 '+large+' 1 '+x2+','+y2;
+    }
+
+    var svg = '<svg viewBox="0 0 120 75" width="120" height="75">' +
+      '<path d="'+arcPath(-90,-30)+'" stroke="#d44b3f" stroke-width="10" fill="none" stroke-linecap="round"/>' +
+      '<path d="'+arcPath(-30,30)+'" stroke="#e9a93b" stroke-width="10" fill="none" stroke-linecap="round"/>' +
+      '<path d="'+arcPath(30,90)+'" stroke="#4f9e5c" stroke-width="10" fill="none" stroke-linecap="round"/>' +
+      '<line x1="'+cx+'" y1="'+cy+'" x2="'+nx+'" y2="'+ny+'" stroke="#185fa5" stroke-width="3" stroke-linecap="round"/>' +
+      '<circle cx="'+cx+'" cy="'+cy+'" r="5" fill="#185fa5"/>' +
+      '</svg>';
+
+    container.innerHTML = svg +
+      '<div class="gval">'+ value.toFixed(decimals) + (suffix||'') +'</div>' +
+      '<div class="glabel">'+label+'</div>';
+  }
+
+  function drawSparkline(canvasId, dates, closes){
+    var ctx = document.getElementById(canvasId);
+    if (!ctx) return null;
+    return new Chart(ctx, {
+      type:'line',
+      data:{ labels: dates, datasets:[{ data: closes, borderColor:'#185fa5', backgroundColor:'rgba(24,95,165,0.08)', fill:true, pointRadius:0, borderWidth:1.5, tension:0.15 }] },
+      options:{
+        responsive:true, maintainAspectRatio:false,
+        plugins:{ legend:{display:false}, tooltip:{enabled:false} },
+        scales:{ x:{display:false}, y:{display:false} },
+        elements:{ point:{radius:0} }
+      }
+    });
+  }
+
+  var sparkCharts = [];
+
+  function renderDashboard(dates, closes, meta){
+    meta = meta || {};
+    document.getElementById('dashCard').style.display = 'block';
+    var n = closes.length;
+    var lastClose = closes[n-1];
+    var lastDate = new Date(dates[n-1]);
+
+    document.getElementById('dashName').textContent = meta.name || meta.ticker || '';
+    document.getElementById('dashTicker').textContent = meta.ticker || '';
+    document.getElementById('dashPrice').textContent = lastClose.toFixed(2) + ' ' + (meta.currency || '');
+    var changeEl = document.getElementById('dashChange');
+    if (meta.changePct !== undefined && meta.changePct !== null && meta.changePct !== ''){
+      var cp = Number(meta.changePct);
+      changeEl.textContent = fmtPct(cp);
+      changeEl.style.color = cp>=0 ? '#2f8a45' : '#a32d2d';
+    } else { changeEl.textContent=''; }
+
+    // --- regression (log-linear) ---
+    var x = []; for (var i=0;i<n;i++) x.push(i);
+    var ylog = closes.map(c=>Math.log(c));
+    var reg = linreg(x, ylog);
+    var predLog = x.map(xi=>reg.intercept + reg.slope*xi);
+    var regression = predLog.map(p=>Math.exp(p));
+    var resid = ylog.map((v,i)=>v-predLog[i]);
+    var sumSq = resid.reduce((a,b)=>a+b*b,0);
+    var std = Math.sqrt(sumSq/(n-2));
+    var valeurTheorique = regression[n-1];
+
+    // Nb écart type = combien d'écarts-types sépare le cours actuel de la régression
+    var nbEcartType = (ylog[n-1] - predLog[n-1]) / std;
+
+    // Coefficient de corrélation entre régression (prix) et cours réel
+    function correl(a,b){
+      var ma=a.reduce((s,v)=>s+v,0)/a.length, mb=b.reduce((s,v)=>s+v,0)/b.length;
+      var num=0, da=0, db=0;
+      for (var k=0;k<a.length;k++){ num += (a[k]-ma)*(b[k]-mb); da += (a[k]-ma)**2; db += (b[k]-mb)**2; }
+      return num / Math.sqrt(da*db);
+    }
+    var coeffCorrel = correl(regression, closes);
+
+    // Croissance modèle : moyenne des croissances annuelles du prix moyen par an
+    var byYear = {};
+    dates.forEach((d,i)=>{ var y = d.slice(0,4); (byYear[y] = byYear[y]||[]).push(closes[i]); });
+    var years = Object.keys(byYear).sort();
+    var avgByYear = years.map(y=>{ var arr=byYear[y]; return arr.reduce((a,b)=>a+b,0)/arr.length; });
+    var yearGrowths = [];
+    for (var yi=1; yi<avgByYear.length; yi++){
+      var g = (avgByYear[yi]-avgByYear[yi-1])/avgByYear[yi-1]*100;
+      if (g > -99 && g < 99) yearGrowths.push(g);
+    }
+    var croissanceModele = yearGrowths.length ? yearGrowths.reduce((a,b)=>a+b,0)/yearGrowths.length : 0;
+
+    // Plus haut / plus bas 52 semaines
+    var idx52 = Math.max(0, n-252);
+    var window52 = closes.slice(idx52);
+    var high52 = meta.high52 || Math.max.apply(null, window52);
+    var low52 = meta.low52 || Math.min.apply(null, window52);
+
+    // Progressions
+    function findClosestIndex(targetDate){
+      var t = targetDate.getTime();
+      var best = 0, bestDiff = Infinity;
+      for (var k=0;k<n;k++){ var diff = Math.abs(new Date(dates[k]).getTime()-t); if (diff<bestDiff){bestDiff=diff; best=k;} }
+      return best;
+    }
+    function progressionSince(daysBack){
+      var target = new Date(lastDate); target.setDate(target.getDate()-daysBack);
+      if (target < new Date(dates[0])) return null;
+      var idx = findClosestIndex(target);
+      return (lastClose - closes[idx]) / closes[idx] * 100;
+    }
+    var prog7j = progressionSince(7);
+    var prog30j = progressionSince(30);
+    var prog1an = progressionSince(365);
+    var prog5ans = progressionSince(365*5);
+
+    // --- Info grid ---
+    var infoGrid = document.getElementById('infoGrid');
+    function card(label,val){ return '<div class="stat"><div class="lbl">'+label+'</div><div class="val">'+val+'</div></div>'; }
+    infoGrid.innerHTML =
+      card('Devise', meta.currency || '-') +
+      card('Valeur théorique', valeurTheorique.toFixed(2)) +
+      card('+ haut 52 sem', high52.toFixed(2)) +
+      card('+ bas 52 sem', low52.toFixed(2)) +
+      card('Progression 7 j', prog7j!==null? fmtPct(prog7j):'-') +
+      card('Progression 30 j', prog30j!==null? fmtPct(prog30j):'-') +
+      card('Progression 1 an', prog1an!==null? fmtPct(prog1an):'-') +
+      card('Progression 5 ans', prog5ans!==null? fmtPct(prog5ans):'-');
+
+    // --- Gauges ---
+    var gaugeGrid = document.getElementById('gaugeGrid');
+    gaugeGrid.innerHTML =
+      '<div class="gauge-box" id="g1"></div>' +
+      '<div class="gauge-box" id="g2"></div>' +
+      '<div class="gauge-box" id="g3"></div>' +
+      '<div class="gauge-box" id="g4"></div>' +
+      '<div class="gauge-box" id="g5"></div>';
+    drawGauge(document.getElementById('g1'), 'Croissance modèle', croissanceModele, -10, 30, 2, '%');
+    drawGauge(document.getElementById('g2'), 'Coeff corrélation', coeffCorrel, 0, 1, 2, '');
+    drawGauge(document.getElementById('g3'), 'Nb écart type', nbEcartType, -3, 3, 2, '');
+    drawGauge(document.getElementById('g4'), 'Prog. 1 an', prog1an||0, -100, 100, 1, '%');
+    drawGauge(document.getElementById('g5'), 'Prog. 5 ans', prog5ans||0, -100, 200, 1, '%');
+
+    // --- Sparklines ---
+    sparkCharts.forEach(c=>{ if(c) c.destroy(); });
+    sparkCharts = [];
+    var sparkGrid = document.getElementById('sparkGrid');
+    var spans = [
+      {label:'6 derniers mois', days:182},
+      {label:'3 derniers mois', days:91},
+      {label:'30 derniers jours', days:30},
+      {label:'7 derniers jours', days:7}
+    ];
+    sparkGrid.innerHTML = spans.map((s,i)=>
+      '<div class="spark-box"><div class="slabel">'+s.label+'</div><div class="spark-canvas-wrap"><canvas id="spark'+i+'"></canvas></div></div>'
+    ).join('');
+    spans.forEach(function(s,i){
+      var idx = findClosestIndex((function(){ var t=new Date(lastDate); t.setDate(t.getDate()-s.days); return t; })());
+      var d = dates.slice(idx);
+      var c = closes.slice(idx);
+      sparkCharts.push(drawSparkline('spark'+i, d, c));
+    });
+  }
+
+  function computeAndRender(dates, closes, tickerLabel, meta){
+    if (!dates.length){ setMsg('Aucune donnée à afficher.', true); return; }
+    document.getElementById('resultsCard').style.display = 'block';
+
+    renderDashboard(dates, closes, Object.assign({ticker: tickerLabel}, meta||{}));
+
+    var n = dates.length;
+    var x = []; for (var i=0;i<n;i++) x.push(i);
+    var ylog = closes.map(function(c){ return Math.log(c); });
+
+    var reg = linreg(x, ylog);
+    var predLog = x.map(function(xi){ return reg.intercept + reg.slope*xi; });
+    var resid = ylog.map(function(v,i){ return v - predLog[i]; });
+    var sumSq = resid.reduce(function(a,b){ return a+b*b; },0);
+    var std = Math.sqrt(sumSq/(n-2));
+
+    var regression = predLog.map(p=>Math.exp(p));
+    var upper1 = predLog.map(p=>Math.exp(p+std));
+    var lower1 = predLog.map(p=>Math.exp(p-std));
+    var upper2 = predLog.map(p=>Math.exp(p+2*std));
+    var lower2 = predLog.map(p=>Math.exp(p-2*std));
+
+    var annualReturn = (Math.exp(reg.slope*252)-1)*100;
+    var lastClose = closes[n-1];
+    var lastReg = regression[n-1];
+    var ecartPct = ((lastClose-lastReg)/lastReg*100);
+    var meanY = ylog.reduce((a,b)=>a+b,0)/n;
+    var totSS = ylog.reduce((a,b)=>a+Math.pow(b-meanY,2),0);
+    var r2 = 1 - sumSq/totSS;
+
+    var statsRow = document.getElementById('statsRow');
+    function card(label,val){
+      return '<div class="stat"><div class="lbl">'+label+'</div><div class="val">'+val+'</div></div>';
+    }
+    statsRow.innerHTML =
+      card('Ticker', tickerLabel || '-') +
+      card('Croissance annualisée', annualReturn.toFixed(2)+' %') +
+      card('R²', r2.toFixed(3)) +
+      card('Écart-type résiduel', (std*100).toFixed(2)+' %') +
+      card('Écart au dernier cours', (ecartPct>=0?'+':'')+ecartPct.toFixed(1)+' %');
+
+    var ctx = document.getElementById('regChart');
+    if (chart) chart.destroy();
+    chart = new Chart(ctx, {
+      type:'line',
+      data:{
+        labels: dates,
+        datasets:[
+          { label:'Cours', data: closes, borderColor:'#2a78d6', backgroundColor:'transparent', pointRadius:0, borderWidth:1.5 },
+          { label:'Régression', data: regression, borderColor:'#e34948', backgroundColor:'transparent', pointRadius:0, borderWidth:2 },
+          { label:'+1σ', data: upper1, borderColor:'#eda100', backgroundColor:'transparent', pointRadius:0, borderWidth:1, borderDash:[6,4] },
+          { label:'-1σ', data: lower1, borderColor:'#eda100', backgroundColor:'transparent', pointRadius:0, borderWidth:1, borderDash:[6,4] },
+          { label:'+2σ', data: upper2, borderColor:'#898781', backgroundColor:'transparent', pointRadius:0, borderWidth:1, borderDash:[1,3] },
+          { label:'-2σ', data: lower2, borderColor:'#898781', backgroundColor:'transparent', pointRadius:0, borderWidth:1, borderDash:[1,3] }
+        ]
+      },
+      options:{
+        responsive:true, maintainAspectRatio:false,
+        plugins:{ legend:{display:false}, tooltip:{ mode:'index', intersect:false } },
+        interaction:{ mode:'index', intersect:false },
+        scales:{
+          x:{ ticks:{ maxTicksLimit:10, color:'#898781' }, grid:{ display:false } },
+          y:{ type:'logarithmic', ticks:{ color:'#898781', callback:function(v){ var s=v.toString(); return (s[0]==='1'||s[0]==='2'||s[0]==='5')? v : ''; } }, grid:{ color:'#e1e0d9' } }
+        }
+      }
+    });
+  }
+
+  document.getElementById('fetchBtn').addEventListener('click', function(){
+    var apiUrl = document.getElementById('apiUrl').value.trim();
+    var ticker = document.getElementById('tickerInput').value.trim();
+    var days = document.getElementById('daysInput').value.trim() || '9125';
+    if (!apiUrl){ setMsg("Renseigne l'URL de ton Apps Script (.../exec).", true); return; }
+    if (!ticker){ setMsg("Renseigne un ticker.", true); return; }
+
+    setMsg('Chargement de ' + ticker + ' ...', false);
+    var url = apiUrl + (apiUrl.indexOf('?')>=0?'&':'?') + 'ticker=' + encodeURIComponent(ticker) + '&days=' + encodeURIComponent(days);
+
+    fetch(url)
+      .then(function(r){
+        if (!r.ok) throw new Error('Réponse HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function(data){
+        if (data.error){ setMsg(data.error, true); return; }
+        if (!data.dates || !data.dates.length){ setMsg('Aucune donnée renvoyée pour ce ticker.', true); return; }
+        setMsg(data.dates.length + ' points chargés pour ' + data.ticker + '.', false);
+        computeAndRender(data.dates, data.closes, data.ticker, data);
+      })
+      .catch(function(err){
+        setMsg("Erreur lors de l'appel à l'API : " + err.message + ". Vérifie l'URL et que le déploiement est accessible à 'Tous les utilisateurs'.", true);
+      });
+  });
+
+  function parseCSV(text){
+    var result = Papa.parse(text, { header:true, skipEmptyLines:true });
+    var rows = result.data;
+    var dates = [], closes = [];
+    rows.forEach(function(r){
+      var keys = Object.keys(r);
+      var dKey = keys.find(k=>k.toLowerCase().indexOf('date')>=0) || keys[0];
+      var cKey = keys.find(k=>k.toLowerCase().indexOf('close')>=0) || keys[1];
+      var dval = r[dKey];
+      var cval = parseFloat(r[cKey]);
+      if (dval && !isNaN(cval) && cval>0){
+        dates.push(String(dval).slice(0,10));
+        closes.push(cval);
+      }
+    });
+    return {dates:dates, closes:closes};
+  }
+
+  document.getElementById('csvInput').addEventListener('change', function(e){
+    var file = e.target.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function(ev){
+      var parsed = parseCSV(ev.target.result);
+      computeAndRender(parsed.dates, parsed.closes, file.name.replace('.csv',''));
+    };
+    reader.readAsText(file);
+  });
+})();
+</script>
+</body>
+</html>
